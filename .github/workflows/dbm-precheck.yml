@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Get DBMaestroAgent.jar file
         # Obtains the DBMaestroAgent.jar from the repository
-        uses: DBMaestroDev/dbm_github_actions/get-dbmagent-jar@main
+        uses: DBMaestroDev/dbm_github_actions/get-dbmagent-jar@v1
         with: 
           version: "v24.1.0.11442"
           target_path: ${{ env.agent_jar_parent_path }} 
@@ -44,7 +44,7 @@ jobs:
       - name: Package Creation 
         # Creates the DBMaestro Package, generating the manifest, zip file, 
         # and uploading it to DBMaestro.
-        uses: DBMaestroDev/dbm_github_actions/dbm-create-package@main
+        uses: DBMaestroDev/dbm_github_actions/dbm-create-package@v1
         with:
           command: 'CreateManifestFileAndPackage'
           package_name: ${{ github.event.client_payload.package_name }}
