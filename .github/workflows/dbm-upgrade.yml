@@ -1,0 +1,80 @@
+name: Upgrade Workflow
+
+env:
+  RUNNERS_OPTIONS: -c cookies=enabled
+  jarPath: "C:\\Program Files (x86)\\DBmaestro\\DOP Server\\Agent\\DBmaestroAgent.jar"
+  DBMprojectName: "BrdJiraGitHub"
+  DBMauthType: "DBmaestroAccount"
+  DBMuserName: "su@dbmaestro.com"
+  DBMauthToken: "zhsiecDKHTGeZBodgykvX1O5H0E5YzaI"
+  jira_secret: "c2VyZ2lvbEBkYm1hZXN0cm8uY29tOkFUQVRUM3hGZkdGMDg2emFINXBsdmJ1MXhTbC1YWXhFaHJxZFZSWHZ0Wk1ibGgzVDBSQ3RmX0lqVlQ2U0hzTENRcEtvWWpvTFk4UHBjZjZaMVBwZWMyZFlqU2diSERiRTVMVVVqMDBKRUhHazZDRlhscXhkUG9GQlpicHFQaEhCejRhNlZVX2Z2MVJERHp3NDZvR3RkaUw3SXZGeDR6ME9UeTNKOUhZYUNIdkNCamlKd2hBVVJkOD1DREY5Qjg5Mw=="
+  DBMserver: "SER1:8017"
+  LOCAL_PATH: "C:\\workspace\\jira-github-lab\\"
+  NEW_STATE: ${{ github.event.client_payload.new_state_id}}
+  #workflowstates
+  READY_TO_QA: '10002'
+  DONE: '10001'
+
+on:
+  repository_dispatch:
+    types: upgrade
+  workflow_dispatch:
+
+jobs:
+  # Job executed for Package deployment. Triggered whed Jira state transitions to Ready To QA or Done
+  # The Job deploys the Package to the corresponding Environment. 
+  upgrade:
+    runs-on: self-hosted
+
+    steps:
+      - name: Print Event
+        run: |
+              echo "This is a triggered event. Condition is:  ${{ github.event.client_payload.dbm_action }} , Package name is: ${{ github.event.client_payload.package_id }} , Status id is: ${{ env.NEW_STATE }}" 
+              echo "Jira new state id:   ${{ github.event.client_payload.new_state_id }}" 
+
+      - name: Upgrading RS and QA Environment
+        # If the new state is Ready to QA, Upgrades Release Source and then QA. Then updates the Issue status in Jira 
+        if: ${{env.NEW_STATE == env.READY_TO_QA }} 
+        run: |
+              echo "Upgrading"
+              $uri = "https://sergiodbm.atlassian.net/rest/api/2/issue/${{ github.event.client_payload.package_id }}"
+              $headers = @{
+                  "Authorization" = "Basic ${{ env.jira_secret }}"
+                  "Content-Type" = "application/json"
+              }
+              java -jar "${{ env.jarPath }}" -Upgrade -ProjectName "${{ env.DBMprojectName }}"  -EnvName "Release Source" -PackageName "${{ github.event.client_payload.package_id }}" -BackupBehavior True -RestoreBehavior True -Server "${{ env.DBMserver }}" -UseSSL False -AuthType DBmaestroAccount -UserName "${{ env.DBMuserName }}" -Password "${{ env.DBMauthToken }}"
+              if ($LastExitCode -eq 0) {
+                $issue_status = "UpgradeRS_OK"
+              } else {
+                $issue_status = "🚨UpgradeRS_ERROR"
+              }
+              $body = @{ "fields" = @{"customfield_10238" = @($issue_status) } } | ConvertTo-Json
+              Invoke-RestMethod -Uri $uri -Method Put -Headers $headers -Body $body
+              
+              java -jar "${{ env.jarPath }}" -Upgrade -ProjectName "${{ env.DBMprojectName }}"  -EnvName "QA_Env_1" -PackageName "${{ github.event.client_payload.package_id }}" -BackupBehavior True -RestoreBehavior True -Server "${{ env.DBMserver }}" -UseSSL False -AuthType DBmaestroAccount -UserName "${{ env.DBMuserName }}" -Password "${{ env.DBMauthToken }}"
+              if ($LastExitCode -eq 0) {
+                $issue_status = "UpgradeQA_OK"
+              } else {
+                $issue_status = "🚨UpgradeQA_ERROR"
+              }
+              $body = @{ "fields" = @{"customfield_10238" = @($issue_status) } } | ConvertTo-Json
+              Invoke-RestMethod -Uri $uri -Method Put -Headers $headers -Body $body
+  
+      - name: Upgrading Prod Environment
+        # If the new state is Done, Upgrades Production. Then updates the Issue status in Jira
+        if: ${{env.NEW_STATE == env.DONE }}
+        run: |
+              echo "Upgrading"
+              $uri = "https://sergiodbm.atlassian.net/rest/api/2/issue/${{ github.event.client_payload.package_id }}"
+              $headers = @{
+                  "Authorization" = "Basic ${{ env.jira_secret }}"
+                  "Content-Type" = "application/json"
+              }
+              java -jar "${{ env.jarPath }}" -Upgrade -ProjectName "${{ env.DBMprojectName }}"  -EnvName "Prod_Env_1" -PackageName " ${{ github.event.client_payload.package_id }}" -BackupBehavior True -RestoreBehavior True -Server "${{ env.DBMserver }}" -UseSSL False -AuthType DBmaestroAccount -UserName "${{ env.DBMuserName }}" -Password "${{ env.DBMauthToken }}"
+              if ($LastExitCode -eq 0) {
+                $issue_status = "UpgradeProd_OK"
+              } else {
+                $issue_status = "🚨UpgradeProd_ERROR"
+              }
+              $body = @{ "fields" = @{"customfield_10238" = @($issue_status) } } | ConvertTo-Json
+              Invoke-RestMethod -Uri $uri -Method Put -Headers $headers -Body $body 

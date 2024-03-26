@@ -1,0 +1,79 @@
+name: Precheck Workflow
+
+env:
+  RUNNERS_OPTIONS: -c cookies=enabled
+  DBMprojectName: "BrdJiraGitHub"
+  DBMauthType: "DBmaestroAccount"
+  DBMuserName: "su@dbmaestro.com"
+  DBMserver: "SER1:8017"
+  local_path: "C:\\workspace\\github-jira-dbm\\"
+  agent_jar_parent_path: "C:\\DBMaestro\\Agent\\"
+  agent_jar_path: "C:\\DBMaestro\\Agent\\dbm-agent-jar\\DBmaestroAgent.jar"
+  new_state: ${{ github.event.client_payload.new_state_id}}
+  #workflowstates
+  READY_TO_REVIEW_STATUS_ID: '10004'
+  
+
+on:
+  repository_dispatch:
+    types: precheck
+  workflow_dispatch:
+
+jobs:
+  # Job executed for Package Prechek. Triggered when Jira state transitions to Ready To Review.
+  # The Job creates the Package and runs DBM Precheck. 
+  precheck:
+    if: ${{ github.event.client_payload.new_state_id == vars.READY_TO_REVIEW_STATUS_ID }}
+    runs-on: self-hosted
+    steps:
+      - name: Get DBMaestroAgent.jar file
+        # Obtains the DBMaestroAgent.jar from the repository
+        uses: sergiolevin/action_test/get-dbmagent-jar@main
+        with: 
+          version: "v24.1.0.11442"
+          target_path: ${{ env.agent_jar_parent_path }} 
+
+
+      - name: Checkout Package files
+        # Obtains the Package files from the repository
+        run: |
+              cd ${{ env.local_path }}
+              git pull origin
+
+
+      - name: Package Creation 
+        # Creates the DBMaestro Package, generating the manifest, zip file, 
+        # and uploading it to DBMaestro.
+        uses: sergiolevin/action_test/dbm-create-package@main
+        with:
+          command: 'CreateManifestFileAndPackage'
+          package_name: ${{ github.event.client_payload.package_name }}
+          files_path: "${{ env.local_path }}packages"
+          project_id: ${{ env.DBMprojectName }}
+          server: ${{ env.DBMserver }}
+          env_name: 'Release Source'
+          user_name: ${{ env.DBMuserName }}
+          password: ${{ env.DBMauthToken }}
+          jar_path: "${{ env.agent_jar_path }}"
+
+      - name: Precheck Package
+        # Prechecks the package in DBMaestro, verifying Policy compliance. 
+        # Updates the result of the Precheck, to Jira Issue
+        run: |
+              java -jar "${{ env.agent_jar_path }}" -PreCheck -ProjectName "${{ env.DBMprojectName }}" -Server "${{ env.DBMserver }}" -PackageName "${{ github.event.client_payload.package_name }}" -UseSSL False -AuthType DBmaestroAccount -UserName "${{ env.DBMuserName }}" -Password "${{ secrets.DBMauthToken }}"
+              if ($LastExitCode -eq 0) {
+                $issue_status = "Precheck_OK"
+              } else {
+                $issue_status = "🚨Precheck_ERROR"
+              }
+              $uri = "https://sergiodbm.atlassian.net/rest/api/2/issue/${{ github.event.client_payload.package_name }}"
+              $headers = @{
+                  "Authorization" = "Basic ${{ secrets.jira_secret }}"
+                  "Content-Type" = "application/json"
+              }
+              
+              $body = @{ "fields" = @{"customfield_10238" = @($issue_status) } } | ConvertTo-Json
+              Invoke-RestMethod -Uri $uri -Method Put -Headers $headers -Body $body
+             
+
+
